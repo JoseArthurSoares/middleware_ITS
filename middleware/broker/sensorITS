@@ -1,0 +1,48 @@
+from collections import deque
+from SubscriptionManager import SubscriptionManager
+def push_data(self, subscriber_id, queue_id, speed):
+        """ Recebe o dado e salva na memória (deque) """
+        # Verifica se a fila existe
+        if subscriber_id in self.subscribers and queue_id in self.subscribers[subscriber_id]:
+            
+            # Adiciona a velocidade na lista
+            self.subscribers[subscriber_id][queue_id].append(speed)
+            
+            print(f"✅ [OK] Velocidade {speed} km/h salva na fila '{queue_id}' de {subscriber_id}.")
+        else:
+            print(f"❌ [ERRO] {subscriber_id} não possui a fila '{queue_id}'.")
+            
+# Instancia a classe ANTES do loop para não perder os dados
+manager = SubscriptionManager()
+
+while True: 
+    print("\n--- MENU DE COMANDOS ---")
+    print("1. Registrar a fila que o veículo vai publicar")
+    print("2. Ver dados salvos (Debug)")
+    print("3. remover")
+    print("4. Sair")
+
+    choice = input("Escolha uma opção: ")
+
+    if choice == '1':
+        # Coleta os dados do usuário
+        vehicle_id = input("Digite o ID do veículo: ")
+        #speed_input = input("Digite a velocidade do veículo (km/h): ")        
+        queue_id = "velocidade" 
+        manager.insert_subscription(vehicle_id, queue_id)
+    
+    elif choice == '2':
+        manager.get_subscriptions()        
+
+    elif choice == '3':
+        vehicle_id = input("Digite o ID do veículo para remover a assinatura: ")
+        queue_id = "velocidade"  # Usando a mesma fila padrão
+
+        manager.remove_subscription(vehicle_id, queue_id)
+
+    elif choice == '4':
+        print("Saindo do programa.")
+        break
+
+    else:
+        print("Opção inválida. Tente novamente.")
