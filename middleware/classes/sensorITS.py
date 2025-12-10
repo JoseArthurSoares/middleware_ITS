@@ -1,19 +1,8 @@
+from SubscriptionsManager import SubscriptionsManager
 from collections import deque
-from SubscriptionManager import SubscriptionManager
-def push_data(self, subscriber_id, queue_id, speed):
-        """ Recebe o dado e salva na memória (deque) """
-        # Verifica se a fila existe
-        if subscriber_id in self.subscribers and queue_id in self.subscribers[subscriber_id]:
-            
-            # Adiciona a velocidade na lista
-            self.subscribers[subscriber_id][queue_id].append(speed)
-            
-            print(f"✅ [OK] Velocidade {speed} km/h salva na fila '{queue_id}' de {subscriber_id}.")
-        else:
-            print(f"❌ [ERRO] {subscriber_id} não possui a fila '{queue_id}'.")
             
 # Instancia a classe ANTES do loop para não perder os dados
-manager = SubscriptionManager()
+manager = SubscriptionsManager()
 
 while True: 
     print("\n--- MENU DE COMANDOS ---")

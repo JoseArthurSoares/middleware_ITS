@@ -1,3 +1,0 @@
-
-class NotificationConsumer:
-    pass
