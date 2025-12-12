@@ -1,74 +1,71 @@
-from collections import deque
+from SubscriptionsManager import SubscriptionsManager
+from EventStorage import EventStorage
+from NotificationConsumer import NotificationConsumer
 
 class NotificationEngine:
     def __init__(self):
-        # Estrutura do init: {'user_1': { 'fila_A': deque(), 'fila_B': deque()} }
-        self.subscribers = {} 
-        self.publishers = {}
+        # 1. Gestores de Dados
+        self.sub_manager = SubscriptionsManager()
+        self.event_manager = EventStorage()
+        
+        # 2. Gestor de Consumo (Injetamos o sub_manager nele)
+        self.consumer = NotificationConsumer(self.sub_manager)
+        
+        # 3. Segurança (Lista de Publishers autorizados)
+        self.authorized_publishers = set()
 
-    #assinantes 
-    #insere um assinante
-    def insert_subscription(self, subscriber_id, queue_id):
-        if subscriber_id not in self.subscribers:
-            self.subscribers[subscriber_id] = {}
+    # ======================================================
+    # Métodos chamados pelo INVOKER (API Pública)
+    # ======================================================
 
-        if queue_id not in self.subscribers[subscriber_id]:
-            # Cria um deque VAZIO inicialmente
-            self.subscribers[subscriber_id][queue_id] = deque(maxlen=20)
-            print(f"Assinatura criada: {subscriber_id} -> {queue_id}")
-        else:
-            print(f"Assinatura já existe: {subscriber_id} -> {queue_id}")
-    
-    def remove_subscription(self, subscriber_id, queue_id):
-        # 1. Verifica se o assinante já existe
-        if subscriber_id in self.subscribers:
-            # 2. Verifica se a fila existe para aquele assinante
-            if queue_id in self.subscribers[subscriber_id]:
-                del self.subscribers[subscriber_id][queue_id]
-                print(f"[-] Inscrição removida: {subscriber_id} -> {queue_id}")
-                
-                # Limpeza (Opcional): Se o usuário não tem mais filas, remove o usuário
-                #if not self.subscribers[subscriber_id]:
-                 #   del self.subscribers[subscriber_id]
-                  #  print(f"    (Usuário {subscriber_id} removido por inatividade)")
-            else:
-                print(f"[Erro] Fila {queue_id} não encontrada para {subscriber_id}")
-        else:
-            print(f"[Erro] Usuário {subscriber_id} não encontrado")
+    # --- Gestão de Assinaturas ---
+    def insert_subscription(self, sensor_id, queue_id):
+        self.sub_manager.insert_subscription(queue_id, sensor_id)
+        return f"ACK: {sensor_id} subscribed to {queue_id}"
 
-    def get_subscriptions(self):
-        print(self.subscribers)
+    def remove_subscription(self, sensor_id, queue_id):
+        res = self.sub_manager.remove_subscription(queue_id, sensor_id)
+        return "ACK" if res else "ERR: Not found"
 
-    #publish
-
-    #insere um publisher
+    # --- Gestão de Publishers ---
     def insert_publisher(self, publisher_id):
-        if publisher_id not in self.subscribers:
-            self.subscribers[publisher_id] = {}
-
-        if publisher_id not in self.subscribers[publisher_id]:
-            # Cria um deque VAZIO inicialmente
-            self.subscribers[publisher_id] = deque(maxlen=20)
-            print(f"Publicador criado: {publisher_id}")
-        else:
-            print(f"Publicador já existe: {publisher_id}")
+        self.authorized_publishers.add(publisher_id)
+        return f"ACK: Publisher {publisher_id} registered"
 
     def remove_publisher(self, publisher_id):
-        # 1. Verifica se o publicador já existe
-        if publisher_id in self.subscribers:
-            del self.subscribers[publisher_id]
-            print(f"[-] Publicador removido: {publisher_id}")
-        else:
-            print(f"[Erro] Publicador {publisher_id} não encontrado")
-    
-    def get_publishers(self):
-        print(self.publishers)
+        if publisher_id in self.authorized_publishers:
+            self.authorized_publishers.remove(publisher_id)
+            return "ACK"
+        return "ERR: Not found"
 
-    def notify (self, publisher_id, message, queue_id):
-        # Notifica todos os assinantes sobre uma nova mensagem do publicador
-        if publisher_id in self.publishers:
-            pass
-            #if queue_id in self.subscribers[subscriber_id]:
-            #     self.subscribers[subscriber_id][queue_id]
-        else:
-            print(f"[Erro] Publicador {publisher_id} não encontrado")
+    # --- Publicação (Notify) ---
+    def notify(self, publisher_id, message, queue_id):
+        """
+        Recebe mensagem, guarda no histórico e distribui para as filas dos assinantes.
+        """
+        if publisher_id not in self.authorized_publishers:
+            return "ERR: Unauthorized Publisher"
+
+        # 1. Guarda no histórico global
+        self.event_manager.publish_event(queue_id, message)
+
+        # 2. Fan-out: Distribui para cada assinante interessado
+        all_subs = self.sub_manager.get_subscriptions()
+        count = 0
+        
+        for sensor_id, sensor_queues in all_subs.items():
+            if queue_id in sensor_queues:
+                # Acede à fila privada do utilizador
+                user_queue = self.sub_manager.get_specific_queue(sensor_id, queue_id)
+                if user_queue is not None:
+                    user_queue.append(message)
+                    count += 1
+        
+        return f"ACK: Delivered to {count} subscribers"
+
+    # --- Consumo (Read) ---
+    def consume(self, sensor_id, queue_id):
+        """
+        O Cliente chama este método para retirar dados da sua fila.
+        """
+        return self.consumer.consume(sensor_id, queue_id)

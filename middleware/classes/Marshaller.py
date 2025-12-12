@@ -1,22 +1,22 @@
 import pickle
 
 class Marshaller:
-    def marshal(self, msg_object) -> bytes:
+    def marshall(self, data):
         """
-        Serializa um objeto Python para bytes.
-        
-        OBS: Não precisamos adicionar cabeçalho de tamanho aqui, 
-        pois o CRH/SRH já fazem isso automaticamente no método send().
+        Serializa um objeto (dict, list, str) para bytes.
         """
-        # Transforma: Dict, Lista, String, Int -> Bytes
-        return pickle.dumps(msg_object)
+        try:
+            return pickle.dumps(data)
+        except Exception as e:
+            print(f"[Marshaller ERROR] Falha ao serializar: {e}")
+            return b''
 
-    def unmarshal(self, msg_bytes) -> any:
+    def unmarshall(self, data_bytes):
         """
-        Deserializa bytes de volta para um objeto Python.
+        Converte bytes de volta para o objeto original.
         """
-        if not msg_bytes:
+        try:
+            return pickle.loads(data_bytes)
+        except Exception as e:
+            print(f"[Marshaller ERROR] Falha ao deserializar: {e}")
             return None
-            
-        # Transforma: Bytes -> Dict, Lista, String, Int
-        return pickle.loads(msg_bytes)
