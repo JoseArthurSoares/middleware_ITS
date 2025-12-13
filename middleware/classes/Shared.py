@@ -1,9 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Any, List
 
-# ==========================================
+
 # Identificação do Objeto Remoto
-# ==========================================
+
 @dataclass
 class IOR:
     """
@@ -14,9 +14,9 @@ class IOR:
     port: int = 0
     objectKey: int = 0  # Identificador único do objeto no servidor
 
-# ==========================================
+
 # Estruturas de Mensagem Interna
-# ==========================================
+
 @dataclass
 class Request:
     """
@@ -32,9 +32,9 @@ class Reply:
     """
     result: Any = None          # O retorno (ex: 30)
 
-# ==========================================
+
 # Estruturas de Fluxo (Proxy <-> Requestor)
-# ==========================================
+
 @dataclass
 class Invocation:
     """

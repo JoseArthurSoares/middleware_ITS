@@ -2,125 +2,163 @@ from EventStorage import EventStorage
 from SubscriptionsManager import SubscriptionsManager
 from ServerRequestHandler import ServerRequestHandler
 from Marshaller import Marshaller
-import sys
+import time
 
 class BrokerEngine:
     def __init__(self, host='localhost', port=8080):
-        print("[DEBUG] Inicializando Managers...")
+        print("[DEBUG] Inicializando Managers (Camada de Negócio)...")
         self.event_storage = EventStorage()
         self.subscription_manager = SubscriptionsManager()
         
-        print("[DEBUG] Inicializando Rede...")
+        print("[DEBUG] Inicializando Infraestrutura (Rede e Serialização)...")
         self.srh = ServerRequestHandler(host, port)
         self.marshaller = Marshaller()
+        
+        # [CONFIGURAÇÃO] Tempo de Vida da Mensagem (TTL)
+        # 0.001 segundos = 1 milésimo. 
+        # Mensagens mais velhas que isso serão descartadas na leitura.
+        self.DEFAULT_TTL = 1.0  # segundos 
 
     def start(self):
-        print(f"[BrokerEngine] Serviço rodando em {self.srh.server_socket.getsockname()}")
+        """
+        Loop Principal (Main Loop).
+        Gerencia o ciclo de vida da requisição: Escutar -> Traduzir -> Processar -> Responder.
+        """
+        print(f"[BrokerEngine] Serviço rodando em {self.srh.server_socket.getsockname()} com TTL de {self.DEFAULT_TTL}s")
         
         while True:
-            # 1. RECEIVE
+            # 1. Wait: Bloqueia até chegar dados na porta
             bytes_received = self.srh.receive()
             if bytes_received is None:
                 continue
 
-            print(f"\n[DEBUG] 1. Bytes recebidos: {len(bytes_received)}")
-
             try:
-                # 2. UNMARSHALL
+                # 2. Unmarshall: Traduz bytes para Dicionário Python
                 inv_arg = self.marshaller.unmarshall(bytes_received)
                 if inv_arg is None:
-                    raise ValueError("Falha no Unmarshall (Dados inválidos ou corrompidos)")
+                    raise ValueError("Falha no Unmarshall (Pacote corrompido)")
                 
-                print(f"[DEBUG] 2. Objeto recebido: {inv_arg}")
-
-                # 3. DISPATCH (Lógica)
-                print("[DEBUG] 3. Entrando na lógica de negócio (run)...")
+                print(f"[DEBUG] Processando Operação: {inv_arg.get('OP')}")
+                
+                # 3. Dispatch: Executa a lógica de negócio
                 result_data = self.run(inv_arg)
-                print(f"[DEBUG] 4. Retorno da lógica: {result_data}")
-
-                # 4. MARSHALL RESPOSTA
+                
+                # 4. Marshall: Traduz a resposta do Dicionário para Bytes
                 bytes_response = self.marshaller.marshall(result_data)
-                print(f"[DEBUG] 5. Tamanho da resposta serializada: {len(bytes_response)}")
-
-                # 5. SEND
+                
+                # 5. Reply: Envia de volta ao cliente
                 self.srh.send(bytes_response)
-                print("[DEBUG] 6. Resposta enviada com sucesso.")
 
             except Exception as e:
-                # AQUI É ONDE VAMOS DESCOBRIR O ERRO
-                print("="*40)
-                print(f"[CRITICAL ERROR] O Servidor falhou durante o processamento!")
-                print(f"Tipo do Erro: {type(e)}")
-                print(f"Mensagem: {e}")
-                import traceback
-                traceback.print_exc() # Imprime a linha exata do erro
-                print("="*40)
-                
-                # Tenta avisar o cliente que deu erro para ele não travar
+                print(f"[ERROR] Falha no processamento: {e}")
+                # Tenta enviar o erro para o cliente não ficar travado (Timeout)
                 try:
-                    err_bytes = self.marshaller.marshall({'status': 'Error', 'msg': str(e)})
-                    self.srh.send(err_bytes)
-                except:
-                    pass
+                    err = self.marshaller.marshall({'status': 'Error', 'msg': str(e)})
+                    self.srh.send(err)
+                except: pass
             
             finally:
+                # Encerra a conexão com o cliente atual para liberar o socket
                 self.srh.close()
-                print("[DEBUG] Conexão fechada.\n")
 
     def run(self, invArg):
-        operation = invArg.get('OP')
-        if operation == 'Publish':
+        """Roteador de comandos."""
+        op = invArg.get('OP')
+        if op == 'Publish':
             return self._handle_publish(invArg)
-        elif operation == 'Subscribe':
+        elif op == 'Subscribe':
             return self._handle_subscribe(invArg)
-        elif operation == 'CheckMsg':
+        elif op == 'CheckMsg':
             return self._handle_check_msg(invArg)
         else:
             return {'status': 'Error', 'msg': 'Operation not supported'}
 
+    # =========================================================================
+    # Lógica de Negócio
+    # =========================================================================
+
     def _handle_publish(self, args):
-        # Validação extra para debug
-        if 'queue_id' not in args:
-            raise KeyError("O dicionário não contem a chave 'queue_id'")
+        """
+        Ao receber uma publicação, agora "envelopamos" o dado com o horário de chegada.
+        Isso permite calcular a idade da mensagem depois.
+        """
+        if 'queue_id' not in args: raise KeyError("Missing queue_id")
         
         queue_ids = args['queue_id']
         message_content = args['MSG']
+        
+        # Carimbo de tempo (Timestamp) da chegada
+        arrival_time = time.time()
 
-        if not isinstance(queue_ids, list):
-            queue_ids = [queue_ids]
+        # O Envelope contém o Dado Real + Metadados
+        envelope = {
+            'payload': message_content,
+            'timestamp': arrival_time
+        }
+
+        if not isinstance(queue_ids, list): queue_ids = [queue_ids]
 
         for q_id in queue_ids:
-            self.event_storage.add_message(q_id, message_content)
+            # Persistência Global
+            self.event_storage.add_message(q_id, envelope)
+            
+            # Fan-out: Distribui cópias para as filas de quem assinou
             all_subs = self.subscription_manager.get_subscriptions()
             for subscriber_id, user_queues in all_subs.items():
                 if q_id in user_queues:
                     user_queue = self.subscription_manager.get_specific_queue(subscriber_id, q_id)
                     if user_queue is not None:
-                        user_queue.append(message_content)
+                        user_queue.append(envelope)
+                        
         return "ACK: Published"
 
     def _handle_subscribe(self, args):
         sensor_id = args['sensor_id']
         queue_ids = args['queue_id']
-        if not isinstance(queue_ids, list):
-            queue_ids = [queue_ids]
+        if not isinstance(queue_ids, list): queue_ids = [queue_ids]
+        
         for q_id in queue_ids:
             self.subscription_manager.insert_subscription(q_id, sensor_id)
         return "ACK: Subscribed"
 
     def _handle_check_msg(self, args):
+        """
+        Regra de Expiração (Lazy Expiration):
+        Quando o cliente vem buscar, verificamos se o dado "venceu".
+        Se (Agora - Chegada) > 0.001s, jogamos fora.
+        """
         sensor_id = args['sensor_id']
         queue_ids = args['queue_id']
-        if not isinstance(queue_ids, list):
-            queue_ids = [queue_ids]
+        if not isinstance(queue_ids, list): queue_ids = [queue_ids]
+            
         messages_found = {}
+        current_time = time.time()
+
         for q_id in queue_ids:
             user_queue = self.subscription_manager.get_specific_queue(sensor_id, q_id)
-            if user_queue and len(user_queue) > 0:
-                msg = user_queue.popleft()
-                messages_found[q_id] = msg
-            else:
-                messages_found[q_id] = None
+            
+            valid_msg = None
+            
+            if user_queue:
+                # Enquanto tiver mensagem na fila, checa a validade da primeira
+                while len(user_queue) > 0:
+                    envelope = user_queue[0] # Olha a primeira sem remover (Peek)
+                    
+                    msg_time = envelope['timestamp']
+                    age = current_time - msg_time # Calcula a idade
+                    
+                    if age > self.DEFAULT_TTL:
+                        # DESCARTAR: Está velha demais
+                        print(f"[TTL] Mensagem descartada do tópico '{q_id}'. Idade: {age:.4f}s > {self.DEFAULT_TTL}s")
+                        user_queue.popleft() # Remove definitivamente
+                        # O loop roda de novo para testar a próxima da fila
+                    else:
+                        # MANTER: Está fresca
+                        valid_msg = user_queue.popleft()['payload']
+                        break # Encontrou uma válida, para de procurar
+            
+            messages_found[q_id] = valid_msg
+                
         return {'OP': 'CheckMsgReply', 'sensor_id': sensor_id, 'MSG': messages_found}
 
 if __name__ == "__main__":

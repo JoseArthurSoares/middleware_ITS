@@ -8,7 +8,6 @@ class SubscriptionsManager:
         # Adiciona a assinatura
         self.subscription_storage.add_subscription(sensor_id, queue_id)
 
-    # --- NOVO MÉTODO ---
     def remove_subscription(self, queue_id, sensor_id):
         """
         Remove a assinatura usando o storage.

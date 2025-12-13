@@ -4,48 +4,43 @@ from ServerRequestHandler import ServerRequestHandler
 
 class Invoker:
     def __init__(self, host, port, engine_impl):
-        """
-        :param engine_impl: A instância direta da NotificationEngine.
-        """
+        # Inicializa infraestrutura de rede, serialização e a lógica de negócio
         self.srh = ServerRequestHandler(host, port)
         self.marshaller = Marshaller()
-        self.engine_impl = engine_impl  # Aqui guardamos a Engine direta
+        self.engine_impl = engine_impl
 
     def invoke(self):
         print(f"Invoker rodando em {self.srh.server_socket.getsockname()}...")
 
         while True:
             try:
-                # 1. Recebe bytes da rede
+                # Recebe os bytes crus da rede via SRH
                 req_bytes = self.srh.receive()
                 if not req_bytes: continue
 
-                # 2. Deserializa (Bytes -> Packet)
+                # Converte os bytes recebidos de volta para um objeto de pacote
                 miop_packet_req = self.marshaller.unmarshal(req_bytes)
 
-                # 3. Extrai dados da Requisição
+                # Extrai o nome da operação alvo e seus argumentos
                 request_data = Miop.extractRequest(miop_packet_req)
-                operation_name = request_data.op  # Ex: "notify", "consume"
-                params = request_data.params      # Ex: ["sensor1", 25.0, "temp"]
+                operation_name = request_data.op
+                params = request_data.params
 
-                # 4. EXECUÇÃO DINÂMICA (A mágica sem Proxy)
-                # Procura o método dentro da NotificationEngine com o nome exato
+                # Busca dinamicamente o método na Engine usando o nome da string
                 method_to_call = getattr(self.engine_impl, operation_name, None)
 
                 result = None
                 if method_to_call:
                     print(f"--> Executando: {operation_name}{params}")
-                    # O '*' desempacota a lista de parâmetros para a função
                     try:
+                        # Executa o método real desempacotando a lista de parâmetros
                         result = method_to_call(*params)
                     except Exception as e:
-                        print(f"Erro na execução da Engine: {e}")
                         result = f"Error: {e}"
                 else:
-                    print(f"Erro: Método '{operation_name}' não existe na Engine.")
                     result = "Error: Method not found"
 
-                # 5. Cria pacote de resposta e envia
+                # Cria o pacote de resposta, serializa para bytes e envia ao cliente
                 miop_packet_rep = Miop.createReplyMIOP(result)
                 rep_bytes = self.marshaller.marshal(miop_packet_rep)
                 self.srh.send(rep_bytes)

@@ -14,10 +14,7 @@ class NotificationEngine:
         # 3. Segurança (Lista de Publishers autorizados)
         self.authorized_publishers = set()
 
-    # ======================================================
     # Métodos chamados pelo INVOKER (API Pública)
-    # ======================================================
-
     # --- Gestão de Assinaturas ---
     def insert_subscription(self, sensor_id, queue_id):
         self.sub_manager.insert_subscription(queue_id, sensor_id)

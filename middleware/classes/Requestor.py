@@ -17,9 +17,9 @@ class Requestor:
         Recebe uma 'Invocation' (contendo IOR e Request) e retorna uma 'Termination'.
         """
         
-        # ---------------------------------------------------------------------
-        # 1. Criação do Pacote MIOP (Protocolo)
-        # ---------------------------------------------------------------------
+        
+        #Criação do Pacote MIOP (Protocolo)
+        
         # Extrai dados da invocação
         op = invocation.request.op
         params = invocation.request.params
@@ -27,16 +27,16 @@ class Requestor:
         # Usa a função do módulo miop (camelCase) para criar o pacote
         miopReqPacket = Miop.createRequestMIOP(op, params)
 
-        # ---------------------------------------------------------------------
-        # 2. Serialização (Marshaller)
-        # ---------------------------------------------------------------------
-        # Transforma o objeto Packet em bytes usando pickle
+        
+        #Serialização (Marshaller)
+        
+        #Transforma o objeto Packet em bytes usando pickle
         marshaller = Marshaller()
         msg_bytes = marshaller.marshal(miopReqPacket)
 
-        # ---------------------------------------------------------------------
-        # 3. Envio via CRH (Rede)
-        # ---------------------------------------------------------------------
+        
+        #Envio via CRH (Rede)
+        
         # Instancia o CRH com host/porta do IOR da invocação
         # O CRH cuida de conectar, enviar o tamanho (framing) e receber a resposta
         crh = ClientRequestHandler(invocation.ior.host, invocation.ior.port)
@@ -47,9 +47,9 @@ class Requestor:
         if not response_bytes:
             raise Exception("Requestor: Recebeu resposta vazia do CRH (Falha de Rede ou Servidor caiu?)")
 
-        # ---------------------------------------------------------------------
-        # 4. Extração da Resposta
-        # ---------------------------------------------------------------------
+        
+        #Extração da Resposta
+        
         # A. Unmarshalling: Bytes -> Objeto Packet
         miopRepPacket = marshaller.unmarshal(response_bytes)
         

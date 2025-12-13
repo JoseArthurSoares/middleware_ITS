@@ -25,7 +25,7 @@ class EventStorage:
         return None
 
     def get_message_by_queue_id(self, queue_id):
-        """Retorna a lista completa (apenas para visualização/debug)"""
+        #Retorna a lista completa (apenas para visualização/debug)
         if queue_id in self.queue_ids:
             return list(self.queue_ids[queue_id])
         return []
