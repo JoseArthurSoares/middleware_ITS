@@ -1,7 +1,7 @@
 import pickle
 
 class Marshaller:
-    def marshall(self, data):
+    def marshal(self, data):
         """
         Serializa um objeto (dict, list, str) para bytes.
         """
@@ -11,7 +11,7 @@ class Marshaller:
             print(f"[Marshaller ERROR] Falha ao serializar: {e}")
             return b''
 
-    def unmarshall(self, data_bytes):
+    def unmarshal(self, data_bytes):
         """
         Converte bytes de volta para o objeto original.
         """

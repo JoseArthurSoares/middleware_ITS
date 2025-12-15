@@ -14,7 +14,6 @@ class TrafficDashboard:
         # ---------------------------------------------------------------------
         # PASSO 1: Assinar o Tópico (Subscribe)
         # ---------------------------------------------------------------------
-        # Isso cria a fila para este usuário lá no BrokerEngine/SubscriptionsManager
         print(f"[Sub] Solicitando assinatura no tópico: '{self.topic}'...")
         
         try:
@@ -27,32 +26,36 @@ class TrafficDashboard:
         # ---------------------------------------------------------------------
         # PASSO 2: Loop de Consumo (Polling)
         # ---------------------------------------------------------------------
-        print("[Sub] Aguardando atualizações de velocidade (Ctrl+C para sair)...")
+        print("[Sub] Aguardando atualizações... (Ctrl+C para sair)")
         
         try:
             while True:
                 # Pergunta ao Broker: "Tem algo pra mim?"
                 response = self.proxy.check_msg(self.topic, self.sensor_id)
                 
-                # O formato esperado da resposta é:
-                # {'OP': 'CheckMsgReply', 'sensor_id': '...', 'MSG': {'Transito/Velocidade': 'VALOR' ou None}}
+                # O Broker retorna algo como: 
+                # {'MSG': {'Transito/Velocidade': '80km/h', 'Outra/Fila': None}}
                 
                 if response and 'MSG' in response:
                     msgs_dict = response['MSG']
-                    content = msgs_dict.get(self.topic)
+                    
+                    # --- ALTERAÇÃO AQUI: Iteramos sobre as filas retornadas ---
+                    found_any = False
+                    
+                    for queue_name, content in msgs_dict.items():
+                        if content: # Se tiver conteúdo (não for None)
+                            print(f"🚗 [Fila: {queue_name}] {content}")
+                            found_any = True
+                    
+                    # Se quiser debug visual de espera (opcional)
+                    # if not found_any: print(".", end="", flush=True)
 
-                    if content:
-                        # Se tiver conteúdo (não for None), imprime formatado
-                        print(f"🚗 [RECEBIDO] {content}")
-                    else:
-                        # Fila vazia no momento.
-                        # Dica: Descomente a linha abaixo se quiser ver "pontinhos" enquanto espera
-                        # print(".", end="", flush=True)
-                        pass
                 else:
-                    print("[Sub] Resposta estranha do broker:", response)
+                    # Caso receba um pacote de erro ou formato inesperado
+                    if response and 'status' in response and response['status'] == 'Error':
+                        print(f"[Erro no Broker] {response.get('msg')}")
 
-                # Espera 1 segundo antes de perguntar de novo (evita floodar o servidor)
+                # Espera 1 segundo antes de perguntar de novo
                 time.sleep(1)
 
         except KeyboardInterrupt:

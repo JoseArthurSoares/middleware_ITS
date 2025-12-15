@@ -55,7 +55,7 @@ class Requestor:
         
         # B. MIOP Extraction: Packet -> Objeto shared.Reply
         # Nota: extractReply devolve um objeto Reply (que contém o .result dentro)
-        reply = miop.extractReply(miopRepPacket)
+        reply = Miop.extractReply(miopRepPacket)
 
         # C. Termination: Encapsula o Reply para devolver ao Proxy
         t = Termination(reply)

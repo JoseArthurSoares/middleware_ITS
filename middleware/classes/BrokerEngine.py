@@ -2,6 +2,7 @@ from EventStorage import EventStorage
 from SubscriptionsManager import SubscriptionsManager
 from ServerRequestHandler import ServerRequestHandler
 from Marshaller import Marshaller
+import Miop
 import time
 
 class BrokerEngine:
@@ -14,55 +15,98 @@ class BrokerEngine:
         self.srh = ServerRequestHandler(host, port)
         self.marshaller = Marshaller()
         
-        # [CONFIGURAÇÃO] Tempo de Vida da Mensagem (TTL)
-        # 0.001 segundos = 1 milésimo. 
-        # Mensagens mais velhas que isso serão descartadas na leitura.
-        self.DEFAULT_TTL = 1.0  # segundos 
+        self.DEFAULT_TTL = 10.0 
 
     def start(self):
-        """
-        Loop Principal (Main Loop).
-        Gerencia o ciclo de vida da requisição: Escutar -> Traduzir -> Processar -> Responder.
-        """
         print(f"[BrokerEngine] Serviço rodando em {self.srh.server_socket.getsockname()} com TTL de {self.DEFAULT_TTL}s")
         
         while True:
-            # 1. Wait: Bloqueia até chegar dados na porta
             bytes_received = self.srh.receive()
             if bytes_received is None:
                 continue
 
             try:
-                # 2. Unmarshall: Traduz bytes para Dicionário Python
-                inv_arg = self.marshaller.unmarshall(bytes_received)
-                if inv_arg is None:
-                    raise ValueError("Falha no Unmarshall (Pacote corrompido)")
+                # 1. Unmarshall: Bytes -> Objeto Complexo
+                req_packet = self.marshaller.unmarshal(bytes_received)
+                if req_packet is None: continue
+
+                # Tenta pegar .bd ou usa o próprio objeto
+                raw_body = getattr(req_packet, 'bd', req_packet)
                 
-                print(f"[DEBUG] Processando Operação: {inv_arg.get('OP')}")
+                # Debug para confirmar o sucesso
+                # print(f"[DEBUG RAW] Chegou: {raw_body}")
+
+                # =========================================================
+                # BLOCO DE ADAPTAÇÃO (ATUALIZADO PARA SUA ESTRUTURA)
+                # =========================================================
                 
-                # 3. Dispatch: Executa a lógica de negócio
+                inv_arg = {}
+                op_name = None
+                params = []
+
+                # --- CASO 1: Estrutura Complexa (Body -> reqHeader -> operation) ---
+                # É este caso que apareceu no seu LOG de erro
+                if hasattr(raw_body, 'reqHeader'):
+                    # Pega a operação dentro do Header
+                    op_name = getattr(raw_body.reqHeader, 'operation', None)
+                    
+                    # Pega os parâmetros dentro do Body -> body
+                    if hasattr(raw_body, 'reqBody'):
+                        params = getattr(raw_body.reqBody, 'body', [])
+
+                # --- CASO 2: Estrutura Simples (Request -> op) ---
+                elif hasattr(raw_body, 'op'): 
+                    op_name = raw_body.op
+                    params = raw_body.params
+
+                # --- CASO 3: Dicionário (Legado) ---
+                elif isinstance(raw_body, dict):
+                    op_name = raw_body.get('OP') or raw_body.get('op')
+                    params = raw_body.get('params') or raw_body.get('args') or []
+                
+                # Validação Final
+                if op_name is None:
+                    raise ValueError(f"Estrutura de pacote não reconhecida: {raw_body}")
+
+                # ---------------------------------------------------------
+                # Normalização para o Broker (Mapeamento)
+                # ---------------------------------------------------------
+                inv_arg['OP'] = op_name
+                
+                if op_name == 'Publish':
+                    if len(params) >= 2:
+                        inv_arg['queue_id'] = params[0]
+                        inv_arg['MSG'] = params[1]
+                elif op_name == 'Subscribe':
+                    if len(params) >= 2:
+                        inv_arg['queue_id'] = params[0]
+                        inv_arg['sensor_id'] = params[1]
+                elif op_name == 'CheckMsg':
+                    if len(params) >= 2:
+                        inv_arg['queue_id'] = params[0]
+                        inv_arg['sensor_id'] = params[1]
+                # =========================================================
+
+                print(f"[DEBUG] Interpretado: OP={inv_arg.get('OP')} | Params: {params}")
+                
+                # 3. Executa a lógica
                 result_data = self.run(inv_arg)
                 
-                # 4. Marshall: Traduz a resposta do Dicionário para Bytes
-                bytes_response = self.marshaller.marshall(result_data)
-                
-                # 5. Reply: Envia de volta ao cliente
+                # 4. Encapsula resposta e Envia
+                reply_packet = Miop.createReplyMIOP(result_data)
+                bytes_response = self.marshaller.marshal(reply_packet)
                 self.srh.send(bytes_response)
 
             except Exception as e:
                 print(f"[ERROR] Falha no processamento: {e}")
-                # Tenta enviar o erro para o cliente não ficar travado (Timeout)
                 try:
-                    err = self.marshaller.marshall({'status': 'Error', 'msg': str(e)})
-                    self.srh.send(err)
+                    err_packet = Miop.createReplyMIOP({'status': 'Error', 'msg': str(e)})
+                    self.srh.send(self.marshaller.marshal(err_packet))
                 except: pass
-            
             finally:
-                # Encerra a conexão com o cliente atual para liberar o socket
                 self.srh.close()
 
     def run(self, invArg):
-        """Roteador de comandos."""
         op = invArg.get('OP')
         if op == 'Publish':
             return self._handle_publish(invArg)
@@ -71,96 +115,53 @@ class BrokerEngine:
         elif op == 'CheckMsg':
             return self._handle_check_msg(invArg)
         else:
-            return {'status': 'Error', 'msg': 'Operation not supported'}
-
-    # =========================================================================
-    # Lógica de Negócio
-    # =========================================================================
+            return {'status': 'Error', 'msg': f'Operacao {op} desconhecida'}
 
     def _handle_publish(self, args):
-        """
-        Ao receber uma publicação, agora "envelopamos" o dado com o horário de chegada.
-        Isso permite calcular a idade da mensagem depois.
-        """
-        if 'queue_id' not in args: raise KeyError("Missing queue_id")
+        q_ids = args.get('queue_id')
+        msg = args.get('MSG')
+        if not q_ids or not msg: raise ValueError("Dados incompletos para Publish")
         
-        queue_ids = args['queue_id']
-        message_content = args['MSG']
-        
-        # Carimbo de tempo (Timestamp) da chegada
-        arrival_time = time.time()
+        envelope = {'payload': msg, 'timestamp': time.time()}
+        if not isinstance(q_ids, list): q_ids = [q_ids]
 
-        # O Envelope contém o Dado Real + Metadados
-        envelope = {
-            'payload': message_content,
-            'timestamp': arrival_time
-        }
-
-        if not isinstance(queue_ids, list): queue_ids = [queue_ids]
-
-        for q_id in queue_ids:
-            # Persistência Global
-            self.event_storage.add_message(q_id, envelope)
-            
-            # Fan-out: Distribui cópias para as filas de quem assinou
-            all_subs = self.subscription_manager.get_subscriptions()
-            for subscriber_id, user_queues in all_subs.items():
-                if q_id in user_queues:
-                    user_queue = self.subscription_manager.get_specific_queue(subscriber_id, q_id)
-                    if user_queue is not None:
-                        user_queue.append(envelope)
-                        
+        for q in q_ids:
+            self.event_storage.add_message(q, envelope)
+            subs = self.subscription_manager.get_subscriptions()
+            for sub_id, queues in subs.items():
+                if q in queues:
+                    uq = self.subscription_manager.get_specific_queue(sub_id, q)
+                    if uq is not None: uq.append(envelope)
         return "ACK: Published"
 
     def _handle_subscribe(self, args):
-        sensor_id = args['sensor_id']
-        queue_ids = args['queue_id']
-        if not isinstance(queue_ids, list): queue_ids = [queue_ids]
+        sid = args.get('sensor_id')
+        q_ids = args.get('queue_id')
+        if not sid or not q_ids: raise ValueError("Dados incompletos para Subscribe")
         
-        for q_id in queue_ids:
-            self.subscription_manager.insert_subscription(q_id, sensor_id)
+        if not isinstance(q_ids, list): q_ids = [q_ids]
+        for q in q_ids:
+            self.subscription_manager.insert_subscription(q, sid)
         return "ACK: Subscribed"
 
     def _handle_check_msg(self, args):
-        """
-        Regra de Expiração (Lazy Expiration):
-        Quando o cliente vem buscar, verificamos se o dado "venceu".
-        Se (Agora - Chegada) > 0.001s, jogamos fora.
-        """
-        sensor_id = args['sensor_id']
-        queue_ids = args['queue_id']
-        if not isinstance(queue_ids, list): queue_ids = [queue_ids]
-            
-        messages_found = {}
-        current_time = time.time()
-
-        for q_id in queue_ids:
-            user_queue = self.subscription_manager.get_specific_queue(sensor_id, q_id)
-            
-            valid_msg = None
-            
-            if user_queue:
-                # Enquanto tiver mensagem na fila, checa a validade da primeira
-                while len(user_queue) > 0:
-                    envelope = user_queue[0] # Olha a primeira sem remover (Peek)
-                    
-                    msg_time = envelope['timestamp']
-                    age = current_time - msg_time # Calcula a idade
-                    
-                    if age > self.DEFAULT_TTL:
-                        # DESCARTAR: Está velha demais
-                        print(f"[TTL] Mensagem descartada do tópico '{q_id}'. Idade: {age:.4f}s > {self.DEFAULT_TTL}s")
-                        user_queue.popleft() # Remove definitivamente
-                        # O loop roda de novo para testar a próxima da fila
+        sid = args.get('sensor_id')
+        q_ids = args.get('queue_id')
+        if not isinstance(q_ids, list): q_ids = [q_ids]
+        
+        found = {}
+        now = time.time()
+        for q in q_ids:
+            uq = self.subscription_manager.get_specific_queue(sid, q)
+            if uq:
+                while uq:
+                    env = uq[0]
+                    if (now - env['timestamp']) > self.DEFAULT_TTL:
+                        uq.popleft() 
                     else:
-                        # MANTER: Está fresca
-                        valid_msg = user_queue.popleft()['payload']
-                        break # Encontrou uma válida, para de procurar
-            
-            messages_found[q_id] = valid_msg
-                
-        return {'OP': 'CheckMsgReply', 'sensor_id': sensor_id, 'MSG': messages_found}
+                        found[q] = uq.popleft()['payload']
+                        break
+        return {'OP': 'CheckMsgReply', 'MSG': found}
 
 if __name__ == "__main__":
-    broker = BrokerEngine()
-    broker.start()
+    BrokerEngine().start()
