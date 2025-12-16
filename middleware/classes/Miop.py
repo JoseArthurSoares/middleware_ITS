@@ -1,101 +1,53 @@
-from dataclasses import dataclass, field
-from typing import List, Any
-#from Shared import IOR, Request, Reply, Invocation, Termination
-import Shared as shared
-# ==========================================
-# Estruturas de Dados (Dataclasses)
-# ==========================================
+"""
+Miop.py Simplificado
+Trabalha puramente com Dicionários. Elimina classes desnecessárias.
+"""
 
-@dataclass
-class Header:
-    magic: str = "MIOP"
-    version: str = "1.0"
-    byteOrder: bool = False
-    messageType: int = 0
-    size: int = 0
+def createRequestMIOP(op, params):
+    """Cria um pacote de requisição simples."""
+    return {
+        'type': 'REQ',
+        'OP': op,
+        'params': params
+    }
 
-@dataclass
-class RequestHeader:
-    context: str = ""
-    requestId: int = 0
-    responseExpected: bool = True
-    objectKey: int = 0
-    operation: str = ""
+def createReplyMIOP(result):
+    """Cria um pacote de resposta simples."""
+    return {
+        'type': 'REP',
+        'result': result
+    }
 
-@dataclass
-class RequestBody:
-    body: List[Any] = field(default_factory=list)
-
-@dataclass
-class ReplyHeader:
-    context: str = ""
-    requestId: int = 0
-    status: int = 0
-
-@dataclass
-class ReplyBody:
-    operationResult: Any = None
-
-@dataclass
-class Body:
-    reqHeader: RequestHeader = field(default_factory=RequestHeader)
-    reqBody: RequestBody = field(default_factory=RequestBody)
-    repHeader: ReplyHeader = field(default_factory=ReplyHeader)
-    repBody: ReplyBody = field(default_factory=ReplyBody)
-
-@dataclass
-class Packet:
-    hdr: Header = field(default_factory=Header)
-    bd: Body = field(default_factory=Body)
-
-# ==========================================
-# Funções do Módulo (camelCase)
-# ==========================================
-
-def createRequestMIOP(op: str, params: List[Any]) -> Packet:
+def extractRequest(packet):
     """
-    Cria um pacote MIOP configurado como Request.
+    Recebe um dicionário (ou objeto) e normaliza para:
+    {'OP': 'NomeDaOperacao', 'params': [arg1, arg2]}
     """
-    reqHeader = RequestHeader(
-        operation=op,
-        responseExpected=True,
-        requestId=100
-    )
-    reqBody = RequestBody(body=params)
-    
-    # Observe o uso das chaves em camelCase aqui também
-    miopBody = Body(reqHeader=reqHeader, reqBody=reqBody)
-    
-    return Packet(bd=miopBody)
+    # 1. Garante que é um dicionário
+    data = packet
+    if not isinstance(packet, dict):
+        # Se por acaso chegar um objeto antigo, tenta converter
+        data = getattr(packet, 'bd', packet)
+        if hasattr(data, '__dict__'): data = data.__dict__
 
-def createReplyMIOP(result: Any) -> Packet:
-    """
-    Cria um pacote MIOP configurado como Reply.
-    """
-    repHeader = ReplyHeader(requestId=1313, status=1)
-    repBody = ReplyBody(operationResult=result)
-    
-    miopBody = Body(repHeader=repHeader, repBody=repBody)
-    
-    return Packet(bd=miopBody)
+    # 2. Extrai Operação (Case insensitive)
+    op = data.get('OP') or data.get('op')
+    params = data.get('params') or data.get('args') or []
 
-def extractRequest(packet: Packet) -> shared.Request:
-    """
-    Extrai a requisição do pacote.
-    """
-    req = shared.Request()
-    # Acesso via camelCase
-    req.op = packet.bd.reqHeader.operation
-    req.params = packet.bd.reqBody.body
-    
-    return req
+    # 3. AUTO-CORREÇÃO (Compatibilidade com seu Cliente atual)
+    # Se params estiver vazio, mas tivermos chaves soltas, montamos a lista.
+    if op and not params:
+        # Pega valores soltos e trata listas de um elemento ['T1'] -> 'T1'
+        q_id = data.get('queue_id')
+        if isinstance(q_id, list) and q_id: q_id = q_id[0]
+        
+        s_id = data.get('sensor_id')
+        msg  = data.get('MSG')
 
-def extractReply(packet: Packet) -> shared.Reply:
-    """
-    Extrai a resposta do pacote.
-    """
-    rep = shared.Reply()
-    # Acesso via camelCase
-    rep.result = packet.bd.repBody.operationResult
-    
-    return rep
+        if op == 'Publish' and q_id and msg:
+            params = [q_id, msg]
+        
+        elif op in ['Subscribe', 'CheckMsg'] and q_id and s_id:
+            params = [q_id, s_id]
+
+    return {'OP': op, 'params': params}

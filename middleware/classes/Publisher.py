@@ -22,7 +22,7 @@ class Publisher:
                 print(f"📤 [ENVIANDO] {msg}")
                 self.proxy.publish(self.topic, msg)
 
-                time.sleep(2)  # Simula intervalo entre carros
+                #time.sleep(2)  # Simula intervalo entre carros
 
         except KeyboardInterrupt:
             print("\n[Publisher] Encerrando sensor.")
