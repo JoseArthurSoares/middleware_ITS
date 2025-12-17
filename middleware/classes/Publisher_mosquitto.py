@@ -11,7 +11,7 @@ client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 print("--- [Publisher] Iniciando Sensor (Mosquitto) ---")
 try:
     client.connect(BROKER_HOST, BROKER_PORT, 60)
-    client.loop_start()  # Inicia loop em background para garantir envio
+    client.loop_start()  # Inicia loop em background
 
     while True:
         # 1. Gera dado

@@ -1,5 +1,3 @@
-# Arquivo: Subscriber.py
-# Responsabilidade: Assinar tópicos e ficar ESCUTANDO a fila (Loop de Consumo)
 import time
 from ClientProxy import ClientProxy
 
@@ -24,12 +22,6 @@ class Subscriber:
             while True:
                 # Pergunta ao Broker
                 data = self.proxy.check_msg(self.topic, self.sub_id)
-
-                # --- MUDANÇA AQUI: Debug para ver o que chega ---
-                # Se data não for None, imprime para entendermos a estrutura
-                if data: 
-                    # print(f"[DEBUG RAW] Recebido do Proxy: {data}") # Descomente se quiser ver tudo
-                    pass
                 
                 # Validação da mensagem
                 if data and 'MSG' in data:
@@ -39,13 +31,6 @@ class Subscriber:
                         print(f"📥 [RECEBIDO] {conteudo}")
                     else:
                         print(f"⚠️ [AVISO] Recebi estrutura 'MSG', mas tópico incorreto: {data['MSG'].keys()}")
-                
-                # Caso o servidor retorne algo que não seja a estrutura esperada
-                elif data and 'result' in data and data['result'] == 'No msg':
-                     # É normal receber 'No msg', então geralmente não printamos nada para não poluir
-                     pass
-                elif data:
-                     print(f"⚠️ [ESTRUTURA DESCONHECIDA] {data}")
 
                 time.sleep(1)
 
